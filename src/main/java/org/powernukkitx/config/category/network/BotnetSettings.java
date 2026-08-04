@@ -6,6 +6,9 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
 
+import java.util.ArrayList;
+import java.util.List;
+
 @EqualsAndHashCode(callSuper = true)
 @Data
 @Accessors(fluent = true)
@@ -22,4 +25,16 @@ public class BotnetSettings extends OkaeriConfig {
     int autoBlockDurationSeconds = 60;
     @Comment("pnx.settings.network.botnet.minscore")
     int minScore = 2;
+    @Comment("pnx.settings.network.botnet.maxConnectionsPerIP")
+    int maxConnectionsPerIp = 10;
+    @Comment("pnx.settings.network.botnet.connectionWindow")
+    long connectionWindow = 5000;
+    @Comment("pnx.settings.network.botnet.connectionLimiter")
+    boolean connectionLimiter = false;
+    @Comment("pnx.settings.network.botnet.blacklistTime")
+    long blacklistTime = 3600;
+    @Comment("pnx.settings.network.botnet.allowList")
+    ArrayList<String> allowIps = new ArrayList<>(List.of(
+        "127.0.0.1"
+    ));
 }

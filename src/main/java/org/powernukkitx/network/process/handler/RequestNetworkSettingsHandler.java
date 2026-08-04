@@ -1,6 +1,7 @@
 package org.powernukkitx.network.process.handler;
 
 import org.powernukkitx.Server;
+import org.powernukkitx.config.category.network.BotnetSettings;
 import org.powernukkitx.network.NetworkConstants;
 import org.powernukkitx.network.process.PacketHandler;
 import org.powernukkitx.network.process.PlayerSessionHolder;
@@ -13,27 +14,82 @@ import org.cloudburstmc.protocol.bedrock.data.PlayStatus;
 import org.cloudburstmc.protocol.bedrock.packet.NetworkSettingsPacket;
 import org.cloudburstmc.protocol.bedrock.packet.RequestNetworkSettingsPacket;
 
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
+import java.util.Date;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * @author Kaooot
  */
 public class RequestNetworkSettingsHandler implements PacketHandler<RequestNetworkSettingsPacket> {
 
+    private static final ConcurrentHashMap<String, Integer> ATTEMPTS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, Long> FIRST_ATTEMPT = new ConcurrentHashMap<>();
+
+    private static final int MAX_ATTEMPTS = Server.getInstance().getSettings().networkSettings().botnetSettings().maxConnectionsPerIp();
+    private static final long TIME_WINDOW = Server.getInstance().getSettings().networkSettings().botnetSettings().connectionWindow();
+
     @Override
     public void handle(RequestNetworkSettingsPacket packet, PlayerSessionHolder holder, Server server) {
+        BedrockServerSession session = holder.getSession();
+        String ip = null;
+
+        SocketAddress socketAddress = holder.getSession().getSocketAddress();
+
+        if (socketAddress instanceof InetSocketAddress address) {
+            InetAddress inetAddress = address.getAddress();
+
+            if (inetAddress != null) {
+                ip = inetAddress.getHostAddress();
+            }
+        }
+
+        if (ip != null) {
+            long now = System.currentTimeMillis();
+
+            FIRST_ATTEMPT.putIfAbsent(ip, now);
+
+            if (now - FIRST_ATTEMPT.get(ip) > TIME_WINDOW) {
+                FIRST_ATTEMPT.put(ip, now);
+                ATTEMPTS.put(ip, 0);
+            }
+
+            int attempts = ATTEMPTS.merge(ip, 1, Integer::sum);
+
+            if (attempts >= MAX_ATTEMPTS) {
+                BotnetSettings botnetSettings = Server.getInstance().getSettings().networkSettings().botnetSettings();
+                if (botnetSettings.connectionLimiter()) {
+
+                    Date expireDate = new Date(System.currentTimeMillis() + (botnetSettings.blacklistTime() * 1000));
+
+                    server.getLogger().warning("The server detected too many connections. The IP address " + ip + " have got banned.");
+                    server.getIPBans().addBan(ip, "Too many connections", expireDate, "CONSOLE");
+
+                    session.close("You have been automatically temporary banned for too many connections.");
+
+                    ATTEMPTS.remove(ip);
+                    FIRST_ATTEMPT.remove(ip);
+                }
+                return;
+            }
+        }
+
         final int clientNetworkVersion = packet.getClientNetworkVersion();
         final int serverNetworkVersion = NetworkConstants.CODEC.getProtocolVersion();
-        final BedrockServerSession session = holder.getSession();
 
         if (clientNetworkVersion != serverNetworkVersion) {
             final boolean serverOutdated = clientNetworkVersion > serverNetworkVersion;
             holder.sendPlayStatus(
-                    serverOutdated ?
-                            PlayStatus.LOGIN_FAILED_SERVER_OLD : PlayStatus.LOGIN_FAILED_CLIENT_OLD
+                serverOutdated ?
+                    PlayStatus.LOGIN_FAILED_SERVER_OLD :
+                    PlayStatus.LOGIN_FAILED_CLIENT_OLD
             );
             holder.disconnect(
-                    serverOutdated ? DisconnectFailReason.OUTDATED_SERVER : DisconnectFailReason.OUTDATED_CLIENT
+                serverOutdated ?
+                    DisconnectFailReason.OUTDATED_SERVER :
+                    DisconnectFailReason.OUTDATED_CLIENT
             );
             return;
         }
@@ -49,9 +105,12 @@ public class RequestNetworkSettingsHandler implements PacketHandler<RequestNetwo
 
         holder.setState(SessionState.REQUESTED_NETWORK_SETTINGS);
 
-        final PacketCompressionAlgorithm algorithm = Server.getInstance().getSettings().networkSettings().snappy() ?
-                PacketCompressionAlgorithm.SNAPPY : PacketCompressionAlgorithm.ZLIB;
-        final NetworkSettingsPacket networkSettingsPacket = new NetworkSettingsPacket();
+        PacketCompressionAlgorithm algorithm =
+            Server.getInstance().getSettings().networkSettings().snappy()
+                ? PacketCompressionAlgorithm.SNAPPY
+                : PacketCompressionAlgorithm.ZLIB;
+
+        NetworkSettingsPacket networkSettingsPacket = new NetworkSettingsPacket();
         networkSettingsPacket.setCompressionThreshold(1);
         networkSettingsPacket.setCompressionAlgorithm(algorithm);
 
@@ -66,9 +125,12 @@ public class RequestNetworkSettingsHandler implements PacketHandler<RequestNetwo
     }
 
     private boolean addressBanCheck(Server server, BedrockServerSession session) {
-        final String address = ((InetSocketAddress) session.getSocketAddress()).getAddress().getHostAddress();
+        String address = ((InetSocketAddress) session.getSocketAddress())
+            .getAddress()
+            .getHostAddress();
+
         if (server.getIPBans().isBanned(address)) {
-            final String reason = server.getIPBans().getEntires().get(address).getReason();
+            String reason = server.getIPBans().getEntires().get(address).getReason();
             session.close(!reason.isEmpty() ? "You are banned. Reason: " + reason : "You are banned");
             return true;
         }
