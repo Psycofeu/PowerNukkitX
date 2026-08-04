@@ -71,8 +71,8 @@ public class RequestNetworkSettingsHandler implements PacketHandler<RequestNetwo
 
                     ATTEMPTS.remove(ip);
                     FIRST_ATTEMPT.remove(ip);
+                    return;
                 }
-                return;
             }
         }
 
