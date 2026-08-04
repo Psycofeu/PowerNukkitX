@@ -46,6 +46,10 @@ public class RequestNetworkSettingsHandler implements PacketHandler<RequestNetwo
             }
         }
 
+        if (this.addressBanCheck(server, session)) {
+            return;
+        }
+
         if (ip != null) {
             long now = System.currentTimeMillis();
 
@@ -96,10 +100,6 @@ public class RequestNetworkSettingsHandler implements PacketHandler<RequestNetwo
 
         if (!holder.getState().equals(SessionState.INITIAL)) {
             holder.disconnect(DisconnectFailReason.UNEXPECTED_PACKET);
-            return;
-        }
-
-        if (this.addressBanCheck(server, session)) {
             return;
         }
 
